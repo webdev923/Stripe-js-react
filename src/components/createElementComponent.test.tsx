@@ -29,6 +29,15 @@ describe('createElementComponent', () => {
   const simulateEvent = (event: string, ...args: any[]) => {
     simulateElementsEvents[event].forEach((fn) => fn(...args));
   };
+  let simulateChange: any;
+  let simulateBlur: any;
+  let simulateFocus: any;
+  let simulateEscape: any;
+  let simulateReady: any;
+  let simulateClick: any;
+  let simulateLoadError: any;
+  let simulateLoaderStart: any;
+  let simulateNetworksChange: any;
 
   beforeEach(() => {
     mockStripe = mocks.mockStripe();
@@ -47,6 +56,38 @@ describe('createElementComponent', () => {
         ...(simulateElementsEvents[event] || []),
         fn,
       ];
+    mockElement.on = jest.fn((event, fn) => {
+      switch (event) {
+        case 'change':
+          simulateChange = fn;
+          break;
+        case 'blur':
+          simulateBlur = fn;
+          break;
+        case 'focus':
+          simulateFocus = fn;
+          break;
+        case 'escape':
+          simulateEscape = fn;
+          break;
+        case 'ready':
+          simulateReady = fn;
+          break;
+        case 'click':
+          simulateClick = fn;
+          break;
+        case 'loaderror':
+          simulateLoadError = fn;
+          break;
+        case 'loaderstart':
+          simulateLoaderStart = fn;
+          break;
+        case 'networkschange':
+          simulateNetworksChange = fn;
+          break;
+        default:
+          throw new Error('TestSetupError: Unexpected event registration.');
+      }
     });
     simulateOff = jest.fn((event, fn) => {
       simulateElementsEvents[event] = simulateElementsEvents[event].filter(
@@ -722,6 +763,7 @@ describe('createElementComponent', () => {
       );
 
       simulateEvent('networkschange');
+      simulateNetworksChange();
       expect(mockHandler2).toHaveBeenCalledWith();
       expect(mockHandler).not.toHaveBeenCalled();
     });
@@ -1759,6 +1801,76 @@ describe('createElementComponent', () => {
 
         expect(mockElement.destroy).toHaveBeenCalled();
       });
+    it('does not overwrite classnames set by the Element instance', () => {
+      const {container, rerender} = render(
+        <Elements stripe={mockStripe}>
+          <CardElement className="bar" />
+        </Elements>
+      );
+      const elementContainer = container.firstChild as Element;
+
+      expect(elementContainer.classList).toHaveLength(1);
+      expect(elementContainer).toHaveClass('bar');
+
+      elementContainer.classList.add('StripeElement', 'StripeElement--empty');
+      rerender(
+        <Elements stripe={mockStripe}>
+          <CardElement className="bar baz" />
+        </Elements>
+      );
+
+      expect(elementContainer.classList).toHaveLength(4);
+      expect(elementContainer).toHaveClass(
+        'bar',
+        'baz',
+        'StripeElement',
+        'StripeElement--empty'
+      );
+
+      rerender(
+        <Elements stripe={mockStripe}>
+          <CardElement className="baz" />
+        </Elements>
+      );
+
+      expect(elementContainer.classList).toHaveLength(3);
+      expect(elementContainer).toHaveClass(
+        'baz',
+        'StripeElement',
+        'StripeElement--empty'
+      );
+    });
+
+    // This should work, but does not
+    // eslint-disable-next-line jest/no-disabled-tests
+    it.skip('does not remove classnames removed from the className prop that were also set by the Element instance', () => {
+      const {container, rerender} = render(
+        <Elements stripe={mockStripe}>
+          <CardElement className="foo StripeElement StripeElement--empty" />
+        </Elements>
+      );
+      const elementContainer = container.firstChild as Element;
+
+      expect(elementContainer.classList).toHaveLength(3);
+      expect(elementContainer).toHaveClass(
+        'foo',
+        'StripeElement',
+        'StripeElement--empty'
+      );
+
+      elementContainer.classList.add('StripeElement', 'StripeElement--empty');
+      rerender(
+        <Elements stripe={mockStripe}>
+          <CardElement className="foo" />
+        </Elements>
+      );
+
+      expect(elementContainer.classList).toHaveLength(3);
+      expect(elementContainer).toHaveClass(
+        'foo',
+        'StripeElement',
+        'StripeElement--empty'
+      );
     });
   });
 });
