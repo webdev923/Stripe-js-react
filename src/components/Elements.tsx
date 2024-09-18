@@ -15,56 +15,51 @@ import {
   extractAllowedOptionsUpdates,
   UnknownOptions,
 } from '../utils/extractAllowedOptionsUpdates';
-import {isStripe, isPromise} from '../utils/guards';
+import {parseStripeProp} from '../utils/parseStripeProp';
+import {registerWithStripeJs} from '../utils/registerWithStripeJs';
+import {useElementsOrCustomCheckoutSdkContextWithUseCase} from './CustomCheckout';
 
-const INVALID_STRIPE_ERROR =
-  'Invalid prop `stripe` supplied to `Elements`. We recommend using the `loadStripe` utility from `@stripe/stripe-js`. See https://stripe.com/docs/stripe-js/react#elements-props-stripe for details.';
-
-// We are using types to enforce the `stripe` prop in this lib, but in a real
-// integration `stripe` could be anything, so we need to do some sanity
-// validation to prevent type errors.
-const validateStripe = (maybeStripe: unknown): null | stripeJs.Stripe => {
-  if (maybeStripe === null || isStripe(maybeStripe)) {
-    return maybeStripe;
-  }
-
-  throw new Error(INVALID_STRIPE_ERROR);
-};
-
-type ParsedStripeProp =
-  | {tag: 'empty'}
-  | {tag: 'sync'; stripe: stripeJs.Stripe}
-  | {tag: 'async'; stripePromise: Promise<stripeJs.Stripe | null>};
-
-const parseStripeProp = (raw: unknown): ParsedStripeProp => {
-  if (isPromise(raw)) {
-    return {
-      tag: 'async',
-      stripePromise: Promise.resolve(raw).then(validateStripe),
-    };
-  }
-
-  const stripe = validateStripe(raw);
-
-  if (stripe === null) {
-    return {tag: 'empty'};
-  }
-
-  return {tag: 'sync', stripe};
-};
-
-interface ElementsContextValue {
+export interface ElementsContextValue {
   elements: stripeJs.StripeElements | null;
   stripe: stripeJs.Stripe | null;
 }
 
-const ElementsContext = React.createContext<ElementsContextValue | null>(null);
+export const ElementsContext = React.createContext<ElementsContextValue | null>(
+  null
+);
 ElementsContext.displayName = 'ElementsContext';
 
 export const parseElementsContext = (
   ctx: ElementsContextValue | null,
   useCase: string
 ): ElementsContextValue => {
+  if (!ctx) {
+    throw new Error(
+      `Could not find Elements context; You need to wrap the part of your app that ${useCase} in an <Elements> provider.`
+    );
+  }
+
+  return ctx;
+};
+
+interface CartElementContextValue {
+  cart: stripeJs.StripeCartElement | null;
+  cartState: stripeJs.StripeCartElementPayloadEvent | null;
+  setCart: (cart: stripeJs.StripeCartElement | null) => void;
+  setCartState: (
+    cartState: stripeJs.StripeCartElementPayloadEvent | null
+  ) => void;
+}
+
+const CartElementContext = React.createContext<CartElementContextValue | null>(
+  null
+);
+CartElementContext.displayName = 'CartElementContext';
+
+export const parseCartElementContext = (
+  ctx: CartElementContextValue | null,
+  useCase: string
+): CartElementContextValue => {
   if (!ctx) {
     throw new Error(
       `Could not find Elements context; You need to wrap the part of your app that ${useCase} in an <Elements> provider.`
@@ -115,6 +110,14 @@ export const Elements: FunctionComponent<PropsWithChildren<ElementsProps>> = (({
   const parsed = React.useMemo(() => parseStripeProp(rawStripeProp), [
     rawStripeProp,
   ]);
+
+  const [cart, setCart] = React.useState<stripeJs.StripeCartElement | null>(
+    null
+  );
+  const [
+    cartState,
+    setCartState,
+  ] = React.useState<stripeJs.StripeCartElementPayloadEvent | null>(null);
 
   // For a sync stripe instance, initialize into context
   const [ctx, setContext] = React.useState<ElementsContextValue>(() => ({
@@ -185,27 +188,17 @@ export const Elements: FunctionComponent<PropsWithChildren<ElementsProps>> = (({
 
   // Attach react-stripe-js version to stripe.js instance
   React.useEffect(() => {
-    const anyStripe: any = ctx.stripe;
-
-    if (
-      !anyStripe ||
-      !anyStripe._registerWrapper ||
-      !anyStripe.registerAppInfo
-    ) {
-      return;
-    }
-
-    anyStripe._registerWrapper({name: 'react-stripe-js', version: _VERSION});
-
-    anyStripe.registerAppInfo({
-      name: 'react-stripe-js',
-      version: _VERSION,
-      url: 'https://stripe.com/docs/stripe-js/react',
-    });
+    registerWithStripeJs(ctx.stripe);
   }, [ctx.stripe]);
 
   return (
-    <ElementsContext.Provider value={ctx}>{children}</ElementsContext.Provider>
+    <ElementsContext.Provider value={ctx}>
+      <CartElementContext.Provider
+        value={{cart, setCart, cartState, setCartState}}
+      >
+        {children}
+      </CartElementContext.Provider>
+    </ElementsContext.Provider>
   );
 }) as FunctionComponent<PropsWithChildren<ElementsProps>>;
 
@@ -221,6 +214,24 @@ export const useElementsContextWithUseCase = (
   return parseElementsContext(ctx, useCaseMessage);
 };
 
+const DUMMY_CART_ELEMENT_CONTEXT: CartElementContextValue = {
+  cart: null,
+  cartState: null,
+  setCart: () => {},
+  setCartState: () => {},
+};
+
+export const useCartElementContextWithUseCase = (
+  useCaseMessage: string,
+  isInCustomCheckout = false
+): CartElementContextValue => {
+  const ctx = React.useContext(CartElementContext);
+  if (isInCustomCheckout) {
+    return DUMMY_CART_ELEMENT_CONTEXT;
+  }
+  return parseCartElementContext(ctx, useCaseMessage);
+};
+
 /**
  * @docs https://stripe.com/docs/stripe-js/react#useelements-hook
  */
@@ -233,8 +244,28 @@ export const useElements = (): stripeJs.StripeElements | null => {
  * @docs https://stripe.com/docs/stripe-js/react#usestripe-hook
  */
 export const useStripe = (): stripeJs.Stripe | null => {
-  const {stripe} = useElementsContextWithUseCase('calls useStripe()');
+  const {stripe} = useElementsOrCustomCheckoutSdkContextWithUseCase(
+    'calls useStripe()'
+  );
   return stripe;
+};
+
+/**
+ * @docs https://stripe.com/docs/payments/checkout/cart-element
+ */
+export const useCartElement = (): stripeJs.StripeCartElement | null => {
+  const {cart} = useCartElementContextWithUseCase('calls useCartElement()');
+  return cart;
+};
+
+/**
+ * @docs https://stripe.com/docs/payments/checkout/cart-element
+ */
+export const useCartElementState = (): stripeJs.StripeCartElementPayloadEvent | null => {
+  const {cartState} = useCartElementContextWithUseCase(
+    'calls useCartElementState()'
+  );
+  return cartState;
 };
 
 interface ElementsConsumerProps {
