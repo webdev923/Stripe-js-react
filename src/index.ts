@@ -194,6 +194,14 @@ export const PaymentMethodMessagingElement: PaymentMethodMessagingElementCompone
 /**
  * @docs https://stripe.com/docs/stripe-js/react#element-components
  */
+export const PaymentMethodMessagingElement: PaymentMethodMessagingElementComponent = createElementComponent(
+  'paymentMethodMessaging',
+  isServer
+);
+
+/**
+ * @docs https://stripe.com/docs/stripe-js/react#element-components
+ */
 export const AffirmMessageElement: AffirmMessageElementComponent = createElementComponent(
   'affirmMessage',
   isServer
